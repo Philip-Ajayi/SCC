@@ -202,7 +202,7 @@ app.post('/contacting', async (req, res) => {
 
   const mailOptions = {
     from: process.env.ZOHO_EMAIL,
-    to: 'ajayiphilipg@gmail.com',
+    to: 'info@supernaturalchurch.com',
     subject,
     text: `Name: ${name}\nEmail: ${email}\nPhone: ${phone}\nMessage: ${message}`
   };
@@ -309,8 +309,8 @@ app.post('/create-checkout-session', async (req, res) => {
       }],
       mode: 'payment',
       customer_email: email,
-      success_url: 'https://your-site.com/success',
-      cancel_url: 'https://your-site.com/cancel',
+      success_url: 'https://supernaturalcc.org/success',
+      cancel_url: 'https://supernaturalcc.org/cancel',
       metadata: { donor_name: name, donation_type: type },
     });
     res.json({ id: session.id });
