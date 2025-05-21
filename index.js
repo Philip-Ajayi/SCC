@@ -1,4 +1,4 @@
-const express = require('express'); 
+const express = require('express');
 const http = require('http');
 const xml2js = require('xml2js');
 const axios = require('axios');
@@ -87,14 +87,15 @@ async function loadRSS() {
 loadRSS();
 setInterval(loadRSS, 2 * 24 * 60 * 60 * 1000);
 
-// ─── AutoDJ Loop (Optimized) ─────────────────────────────────────────────────────
+// ─── AutoDJ Loop with Full-Play Tracking ─────────────────────────────────────────
 async function autoDJLoop() {
   while (true) {
+    // Skip if live or no tracks
     if (isLive || autodjTracks.length === 0) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       continue;
     }
-
+    // Skip if no listeners
     if (listeners.length === 0) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       continue;
@@ -103,13 +104,18 @@ async function autoDJLoop() {
     const track = autodjTracks[currentAutoDJIndex % autodjTracks.length];
     console.log('AutoDJ playing:', track.title);
 
+    let trackFinished = true;
     try {
       const response = await fetch(track.url);
       const reader = response.body;
 
       for await (const chunk of reader) {
-        if (isLive) break;
+        if (isLive) {
+          trackFinished = false;
+          break;
+        }
         if (listeners.length === 0) {
+          // pause streaming when no listeners
           await new Promise(resolve => setTimeout(resolve, 1000));
           continue;
         }
@@ -117,9 +123,13 @@ async function autoDJLoop() {
       }
     } catch (err) {
       console.error('AutoDJ error:', err);
+      trackFinished = false;
     }
 
-    currentAutoDJIndex++;
+    // Only increment index if fully played
+    if (trackFinished) {
+      currentAutoDJIndex++;
+    }
   }
 }
 autoDJLoop();
@@ -267,9 +277,7 @@ app.post('/api/send-newsletter', async (req, res) => {
     if (!subs.length) return res.status(404).json({ message: 'No subscribers.' });
 
     await Promise.all(subs.map(sub => {
-      // Header unsubscribe points to backend API
       const listUnsubUrl = `/api/unsubscribe/${sub._id}`;
-      // Email body unsubscribe
       const htmlUnsubUrl = `unsubscribe/${sub._id}`;
       const html = `<p>Hello ${sub.name},</p>${customHtml}<hr/>\n<p><a href=\"${htmlUnsubUrl}\">Unsubscribe</a></p>`;
       return transporter.sendMail({
