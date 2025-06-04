@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const http = require('http');
 const xml2js = require('xml2js');
 const axios = require('axios');
@@ -220,7 +220,7 @@ app.post('/contacting', async (req, res) => {
 
     const mailOptions = {
       from: process.env.ZOHO_EMAIL,
-      to: 'info@supernaturalchurch.com',
+      to: 'info@supernaturalcc.org',
       subject: `${name} is requesting a location`,
       text: `Name: ${name}\nEmail: ${email}\nPhone: ${phone}`
     };
