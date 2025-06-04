@@ -205,10 +205,40 @@ app.get('/listener-stats', async (req, res) => {
 // ─── Contact Form ───────────────────────────────────────────────────────────────
 app.post('/contacting', async (req, res) => {
   const { name, email, phone, message, reason } = req.body;
+
+  // Validate required fields
+  if (!name || !email || !phone || !reason) {
+    return res.status(400).send('Missing required fields.');
+  }
+
+  // Handle "location_request" differently
+  if (reason === 'location_request') {
+    // Reject if any unwanted field is included (like message)
+    if (message) {
+      return res.status(400).send('Location requests should not include a message.');
+    }
+
+    const mailOptions = {
+      from: process.env.ZOHO_EMAIL,
+      to: 'info@supernaturalchurch.com',
+      subject: `${name} is requesting a location`,
+      text: `Name: ${name}\nEmail: ${email}\nPhone: ${phone}`
+    };
+
+    try {
+      await transporter.sendMail(mailOptions);
+      return res.send('Location request sent successfully!');
+    } catch (err) {
+      console.error(err);
+      return res.status(500).send('Something went wrong.');
+    }
+  }
+
+  // For other reasons, proceed as usual
   let subject = 'New Contact Form Submission';
   if (reason === 'prayer_request') subject = `${name} needs prayer`;
-  if (reason === 'ask_question')  subject = `${name} has a question`;
-  if (reason === 'get_involved')  subject = `${name} wants to get involved`;
+  if (reason === 'ask_question') subject = `${name} has a question`;
+  if (reason === 'get_involved') subject = `${name} wants to get involved`;
 
   const mailOptions = {
     from: process.env.ZOHO_EMAIL,
