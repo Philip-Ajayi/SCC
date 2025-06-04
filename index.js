@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const http = require('http');
 const xml2js = require('xml2js');
 const axios = require('axios');
@@ -213,7 +213,6 @@ app.post('/contacting', async (req, res) => {
 
   // Handle "location_request" differently
   if (reason === 'location_request') {
-    // Reject if any unwanted field is included (like message)
     if (message) {
       return res.status(400).send('Location requests should not include a message.');
     }
@@ -234,7 +233,12 @@ app.post('/contacting', async (req, res) => {
     }
   }
 
-  // For other reasons, proceed as usual
+  // Validate message for other reasons
+  if (!message) {
+    return res.status(400).send('Message is required for this type of request.');
+  }
+
+  // Determine subject line based on reason
   let subject = 'New Contact Form Submission';
   if (reason === 'prayer_request') subject = `${name} needs prayer`;
   if (reason === 'ask_question') subject = `${name} has a question`;
@@ -242,7 +246,7 @@ app.post('/contacting', async (req, res) => {
 
   const mailOptions = {
     from: process.env.ZOHO_EMAIL,
-    to: 'info@supernaturalchurch.com',
+    to: 'info@supernaturalcc.org',
     subject,
     text: `Name: ${name}\nEmail: ${email}\nPhone: ${phone}\nMessage: ${message}`
   };
