@@ -1,3 +1,5 @@
+﻿require('dotenv').config();
+
 const express = require('express');
 const http = require('http');
 const xml2js = require('xml2js');
@@ -8,17 +10,19 @@ const moment = require('moment');
 const nodemailer = require('nodemailer');
 const Stripe = require('stripe');
 const cors = require('cors');
-const dotenv = require('dotenv');
 const basicAuth = require('basic-auth');
 const path = require('path');
-
-dotenv.config();
+const { Resend } = require('resend'); // ✅ Fixed Resend import
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const port = process.env.PORT || 5000;
 const server = http.createServer(app);
 const RSS_URL = 'https://feeds.soundcloud.com/users/soundcloud:users:1202808049/sounds.rss';
+
+// Initialize Resend
+const resend = new Resend('re_euN3FPGc_4gwRE3EjetMmH3QTbVekQiAk');
+const FROM_EMAIL = 'Supernatural CC <info@supernaturalcc.org>';
 
 app.use(cors());
 app.use(express.json());
@@ -49,7 +53,7 @@ const subscriberSchema = new mongoose.Schema({
 });
 const Subscriber = mongoose.model('Subscriber', subscriberSchema);
 
-// Mail transporter
+// Mail transporter (optional fallback)
 const transporter = nodemailer.createTransport({
   service: 'Zoho',
   auth: {
@@ -90,12 +94,10 @@ setInterval(loadRSS, 2 * 24 * 60 * 60 * 1000);
 // ─── AutoDJ Loop with Full-Play Tracking ─────────────────────────────────────────
 async function autoDJLoop() {
   while (true) {
-    // Skip if live or no tracks
     if (isLive || autodjTracks.length === 0) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       continue;
     }
-    // Skip if no listeners
     if (listeners.length === 0) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       continue;
@@ -115,7 +117,6 @@ async function autoDJLoop() {
           break;
         }
         if (listeners.length === 0) {
-          // pause streaming when no listeners
           await new Promise(resolve => setTimeout(resolve, 1000));
           continue;
         }
@@ -126,10 +127,7 @@ async function autoDJLoop() {
       trackFinished = false;
     }
 
-    // Only increment index if fully played
-    if (trackFinished) {
-      currentAutoDJIndex++;
-    }
+    if (trackFinished) currentAutoDJIndex++;
   }
 }
 autoDJLoop();
@@ -145,52 +143,35 @@ app.post('/live', (req, res) => {
 
 app.get('/listen', async (req, res) => {
   const listenerIP = req.ip || req.connection.remoteAddress;
-  res.writeHead(200, {
-    'Content-Type': 'audio/mpeg',
-    'Transfer-Encoding': 'chunked'
-  });
+  res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Transfer-Encoding': 'chunked' });
   listeners.push(res);
 
   const timestamp = moment().utc().format();
-  if (db) {
-    await db.collection('listener_attendance').insertOne({ ip: listenerIP, timestamp });
-  }
+  if (db) await db.collection('listener_attendance').insertOne({ ip: listenerIP, timestamp });
 
-  req.on('close', () => {
-    listeners = listeners.filter(r => r !== res);
-  });
+  req.on('close', () => { listeners = listeners.filter(r => r !== res); });
 });
 
 app.post('/update-live-title', (req, res) => {
   const { title } = req.body;
-  if (!title || typeof title !== 'string') {
-    return res.status(400).json({ message: 'Invalid title format.' });
-  }
+  if (!title || typeof title !== 'string') return res.status(400).json({ message: 'Invalid title format.' });
   liveTitle = title;
   console.log('Live title updated:', title);
   res.json({ message: 'Live title updated.' });
 });
 
 app.get('/current-track', (req, res) => {
-  if (isLive) {
-    return liveTitle
-      ? res.json({ currentTrackTitle: liveTitle })
-      : res.status(404).json({ message: 'Live stream is on, but no title set.' });
-  } else {
-    if (autodjTracks.length === 0) {
-      return res.status(404).json({ message: 'No AutoDJ track loaded.' });
-    }
-    const current = autodjTracks[currentAutoDJIndex % autodjTracks.length];
-    res.json({ currentTrackTitle: current.title });
-  }
+  if (isLive) return liveTitle ? res.json({ currentTrackTitle: liveTitle }) : res.status(404).json({ message: 'Live stream is on, but no title set.' });
+  if (autodjTracks.length === 0) return res.status(404).json({ message: 'No AutoDJ track loaded.' });
+  const current = autodjTracks[currentAutoDJIndex % autodjTracks.length];
+  res.json({ currentTrackTitle: current.title });
 });
 
 // ─── Listener Stats ─────────────────────────────────────────────────────────────
 app.get('/listener-stats', async (req, res) => {
   const { start, end } = req.query;
-  if (!start || !end) {
-    return res.json({ activeListeners: listeners.length });
-  }
+  if (!start || !end) return res.json({ activeListeners: listeners.length });
+
   try {
     const uniqueIPs = await db.collection('listener_attendance').aggregate([
       { $match: { timestamp: { $gte: start, $lte: end } } },
@@ -202,95 +183,51 @@ app.get('/listener-stats', async (req, res) => {
   }
 });
 
-// ─── Contact Form ───────────────────────────────────────────────────────────────
+// ─── Contact Form using Resend ─────────────────────────────────────────────────
 app.post('/contacting', async (req, res) => {
   const { name, email, phone, message, reason } = req.body;
+  if (!name || !email || !phone || !reason) return res.status(400).send('Missing required fields.');
 
-  // Validate required fields
-  if (!name || !email || !phone || !reason) {
-    return res.status(400).send('Missing required fields.');
-  }
-
-  // Handle "location_request" differently
-  if (reason === 'location_request') {
-    if (message) {
-      return res.status(400).send('Location requests should not include a message.');
-    }
-
-    const mailOptions = {
-      from: process.env.ZOHO_EMAIL,
-      to: 'info@supernaturalcc.org',
-      subject: `${name} is requesting a location`,
-      text: `Name: ${name}\nEmail: ${email}\nPhone: ${phone}`
-    };
-
-    try {
-      await transporter.sendMail(mailOptions);
-      return res.send('Location request sent successfully!');
-    } catch (err) {
-      console.error(err);
-      return res.status(500).send('Something went wrong.');
-    }
-  }
-
-  // Validate message for other reasons
-  if (!message) {
-    return res.status(400).send('Message is required for this type of request.');
-  }
-
-  // Determine subject line based on reason
   let subject = 'New Contact Form Submission';
   if (reason === 'prayer_request') subject = `${name} needs prayer`;
   if (reason === 'ask_question') subject = `${name} has a question`;
   if (reason === 'get_involved') subject = `${name} wants to get involved`;
-
-  const mailOptions = {
-    from: process.env.ZOHO_EMAIL,
-    to: 'info@supernaturalcc.org',
-    subject,
-    text: `Name: ${name}\nEmail: ${email}\nPhone: ${phone}\nMessage: ${message}`
-  };
+  if (reason === 'location_request') subject = `${name} is requesting a location`;
 
   try {
-    await transporter.sendMail(mailOptions);
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: 'info@supernaturalcc.org',
+      subject,
+      text: `Name: ${name}\nEmail: ${email}\nPhone: ${phone}\nMessage: ${message || ''}`,
+      html: `
+        <h3>${subject}</h3>
+        <p><strong>Name:</strong> ${name}</p>
+        <p><strong>Email:</strong> ${email}</p>
+        <p><strong>Phone:</strong> ${phone}</p>
+        <p><strong>Message:</strong> ${message || ''}</p>
+      `
+    });
     res.send('Message sent successfully!');
   } catch (err) {
-    console.error(err);
+    console.error('Resend email error:', err);
     res.status(500).send('Something went wrong.');
   }
 });
 
 // ─── Subscriber API ─────────────────────────────────────────────────────────────
 app.get('/api/subscribers', async (req, res) => {
-  try {
-    const subscribers = await Subscriber.find();
-    res.json({ subscribers });
-  } catch (err) {
-    res.status(500).json({ message: 'Error fetching subscribers.' });
-  }
+  try { const subscribers = await Subscriber.find(); res.json({ subscribers }); } 
+  catch (err) { res.status(500).json({ message: 'Error fetching subscribers.' }); }
 });
 
 app.post('/api/subscribe', async (req, res) => {
   const { name, email } = req.body;
   try {
-    if (await Subscriber.findOne({ email })) {
-      return res.status(400).json({ message: 'Subscriber already exists.' });
-    }
+    if (await Subscriber.findOne({ email })) return res.status(400).json({ message: 'Subscriber already exists.' });
     await new Subscriber({ name, email }).save();
     res.status(201).json({ message: 'Subscription successful.' });
-  } catch {
-    res.status(500).json({ message: 'Server error.' });
-  }
-});
-
-app.get('/api/subscriber/:id', async (req, res) => {
-  try {
-    const sub = await Subscriber.findById(req.params.id);
-    if (!sub) return res.status(404).json({ message: 'Not found.' });
-    res.json(sub);
-  } catch {
-    res.status(500).json({ message: 'Error fetching subscriber.' });
-  }
+  } catch { res.status(500).json({ message: 'Server error.' }); }
 });
 
 app.delete('/api/unsubscribe/:id', async (req, res) => {
@@ -298,32 +235,23 @@ app.delete('/api/unsubscribe/:id', async (req, res) => {
     const del = await Subscriber.findByIdAndDelete(req.params.id);
     if (!del) return res.status(404).json({ message: 'Not found.' });
     res.json({ message: 'Unsubscribed successfully.' });
-  } catch {
-    res.status(500).json({ message: 'Error processing request.' });
-  }
+  } catch { res.status(500).json({ message: 'Error processing request.' }); }
 });
 
-// ─── Newsletter ─────────────────────────────────────────────────────────────────
+// ─── Newsletter / Send to Subscribers via Resend ───────────────────────────────
 app.post('/api/send-newsletter', async (req, res) => {
   const { customHtml } = req.body;
   try {
     const subs = await Subscriber.find();
     if (!subs.length) return res.status(404).json({ message: 'No subscribers.' });
 
-    await Promise.all(subs.map(sub => {
-      const listUnsubUrl = `/api/unsubscribe/${sub._id}`;
-      const htmlUnsubUrl = `unsubscribe/${sub._id}`;
-      const html = `<p>Hello ${sub.name},</p>${customHtml}<hr/>\n<p><a href=\"${htmlUnsubUrl}\">Unsubscribe</a></p>`;
-      return transporter.sendMail({
-        from: process.env.ZOHO_EMAIL,
-        to: sub.email,
-        subject: 'Newsletter',
-        html,
-        headers: {
-          'List-Unsubscribe': `<${listUnsubUrl}>`
-        }
-      });
-    }));
+    await Promise.all(subs.map(sub => resend.emails.send({
+      from: FROM_EMAIL,
+      to: sub.email,
+      subject: `Newsletter for ${sub.name}`,
+      text: `Hello ${sub.name}\n\n${customHtml}`,
+      html: `<p>Hello ${sub.name},</p>${customHtml}`
+    })));
 
     res.json({ message: `Newsletter sent to ${subs.length} subscribers.` });
   } catch (err) {
@@ -356,21 +284,12 @@ app.post('/create-checkout-session', async (req, res) => {
       metadata: { donor_name: name, donation_type: type },
     });
     res.json({ id: session.id });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
 });
 
-// Serve static files from the "dist" directory
+// Serve static files
 app.use(express.static(path.join(__dirname, 'dist')));
+app.get('*', (req, res) => { res.sendFile(path.join(__dirname, 'dist', 'index.html')); });
 
-// Optional: fallback to index.html for Single Page Applications (e.g., React/Vue)
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-});
-
-// ─── Start Server ───────────────────────────────────────────────────────────────
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
-});
+// Start server
+app.listen(port, () => console.log(`Server running at http://localhost:${port}`));
