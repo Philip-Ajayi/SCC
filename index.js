@@ -22,7 +22,7 @@ const RSS_URL = 'https://feeds.soundcloud.com/users/soundcloud:users:1202808049/
 
 // Initialize Resend
 const resend = new Resend('re_euN3FPGc_4gwRE3EjetMmH3QTbVekQiAk');
-const FROM_EMAIL = 'Supernatural CC <info@supernaturalcc.org>';
+const FROM_EMAIL = 'Supernatural CC <info@noreply.supernaturalcc.org>';
 
 app.use(cors());
 app.use(express.json());
@@ -293,3 +293,4 @@ app.get('*', (req, res) => { res.sendFile(path.join(__dirname, 'dist', 'index.ht
 
 // Start server
 app.listen(port, () => console.log(`Server running at http://localhost:${port}`));
+
