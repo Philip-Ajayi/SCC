@@ -1,8 +1,31 @@
 {
-  "rewrites": [
+  "version": 2,
+  "builds": [
     {
-      "source": "/((?!api/).*)",
-      "destination": "/dist/$1"
+      "src": "index.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "dist/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "index.js"
+    },
+    {
+      "src": "/contacting",
+      "dest": "index.js"
+    },
+    {
+      "src": "/create-checkout-session",
+      "dest": "index.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "dist/$1"
     }
   ]
 }
